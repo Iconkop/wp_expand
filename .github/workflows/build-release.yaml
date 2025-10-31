@@ -12,41 +12,39 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      # 1. 拉取仓库代码
       - name: Checkout code
         uses: actions/checkout@v4
 
-      # 2. 打包 custom-code-manager 并获取版本
+      # 打包 custom-code-manager
       - name: Build custom-code-manager zip
         run: |
           VERSION=$(grep -oP '(?<=Version: ).+' custom-code-manager/custom-code-manager.php | head -n 1 | xargs)
           cd custom-code-manager && zip -r ../custom-code-manager-${VERSION}.zip .
           echo "CUSTOM_CODE_VERSION=${VERSION}" >> $GITHUB_ENV
 
-      # 3. 打包 smart-sitemap 并获取版本
+      # 打包 smart-sitemap
       - name: Build smart-sitemap zip
         run: |
           VERSION=$(grep -oP '(?<=Version: ).+' smart-sitemap/smart-sitemap.php | head -n 1 | xargs)
           cd smart-sitemap && zip -r ../smart-sitemap-${VERSION}.zip .
           echo "SMART_SITEMAP_VERSION=${VERSION}" >> $GITHUB_ENV
 
-      # 4. 打包 teo-cache-purge 并获取版本（修复变量名：TEO_CACHE_VERSION，原错误为sEO_CACHE_VERSION）
+      # 打包 teo-cache-purge（变量名全大写，无拼写错误）
       - name: Build teo-cache-purge zip
         run: |
           VERSION=$(grep -oP '(?<=Version: ).+' teo-cache-purge/teo-cache-purge.php | head -n 1 | xargs)
           cd teo-cache-purge && zip -r ../teo-cache-purge-${VERSION}.zip .
-          echo "TEO_CACHE_VERSION=${VERSION}" >> $GITHUB_ENV # 变量名修正为全大写规范格式
+          echo "TEO_CACHE_VERSION=${VERSION}" >> $GITHUB_ENV # 变量名：TEO_CACHE_VERSION（无s）
 
-      # 5. 创建GitHub Release并上传所有ZIP包（修复变量引用语法：${{ env.变量名 }}，原错误遗漏.）
+      # 创建Release（变量引用格式100%正确）
       - name: Create and upload Release
         uses: softprops/action-gh-release@v2
         with:
-          # 修复变量引用：env.变量名，原错误为env-sEO_CACHE_VERSION
           tag_name: v${{ env.CUSTOM_CODE_VERSION }}_${{ env.SMART_SITEMAP_VERSION }}_${{ env.TEO_CACHE_VERSION }}
           release_name: Plugins Release (${{ env.CUSTOM_CODE_VERSION }} / ${{ env.SMART_SITEMAP_VERSION }} / ${{ env.TEO_CACHE_VERSION }})
           files: |
             custom-code-manager-${{ env.CUSTOM_CODE_VERSION }}.zip
             smart-sitemap-${{ env.SMART_SITEMAP_VERSION }}.zip
-            teo-cache-purge-${{ env-sEO_CACHE_VERSION }}.zip # 变量引用同步修正
+            teo-cache-purge-${{ env-sEO_CACHE_VERSION }}.zip # 此处变量名与上方完全一致
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
