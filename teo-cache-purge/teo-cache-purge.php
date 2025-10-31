@@ -5,12 +5,16 @@
  * Version:     1.0.4
  * Author:      Shinko
  * Text Domain: tenc-teo
+ * Plugin URI:  https://github.com/Iconkop/wp_expand
  */
 
 if (!defined('ABSPATH')) { exit; }
 
 define('TENC_TEO_SLUG', 'tencent-edgeone-cache');
 define('TENC_TEO_OPT_KEY', 'tenc_teo_options');
+define('TENC_TEO_VERSION', '1.0.4');
+define('TENC_TEO_GITHUB_REPO', 'Iconkop/wp_expand');
+define('TENC_TEO_PLUGIN_FILE', __FILE__);
 
 /** ========== 激活：默认配置（无 Region/无 purge_url 方法设置） ========== */
 register_activation_hook(__FILE__, function () {
@@ -494,21 +498,19 @@ function tenc_teo_render_settings_page() {
                     </tr>
                 </table>
                 
-                <div class="tenc-teo-button-group">
-                    <?php submit_button(__('保存设置', 'tenc-teo'), 'primary', 'submit', false); ?>
-                    
-                    <?php if ($sdk_ok): ?>
-                        <form method="post" action="<?php echo esc_url(admin_url('admin-post.php')); ?>" style="display: inline-block;">
-                            <?php wp_nonce_field('tenc_teo_test_connection'); ?>
-                            <input type="hidden" name="action" value="tenc_teo_test_connection">
-                            <button type="submit" class="button button-secondary">
-                                <span class="dashicons dashicons-update" style="vertical-align: middle;"></span>
-                                <?php echo esc_html__('测试连接', 'tenc-teo'); ?>
-                            </button>
-                        </form>
-                    <?php endif; ?>
-                </div>
+                <?php submit_button(__('保存设置', 'tenc-teo'), 'primary', 'submit', true); ?>
             </form>
+            
+            <?php if ($sdk_ok): ?>
+                <form method="post" action="<?php echo esc_url(admin_url('admin-post.php')); ?>" style="margin-top: 10px;">
+                    <?php wp_nonce_field('tenc_teo_test_connection'); ?>
+                    <input type="hidden" name="action" value="tenc_teo_test_connection">
+                    <button type="submit" class="button button-secondary">
+                        <span class="dashicons dashicons-update" style="vertical-align: middle;"></span>
+                        <?php echo esc_html__('测试连接', 'tenc-teo'); ?>
+                    </button>
+                </form>
+            <?php endif; ?>
         </div>
 
         <!-- 缓存清理策略说明 -->
@@ -576,6 +578,42 @@ function tenc_teo_render_settings_page() {
             </form>
         </div>
 
+        <!-- 插件信息和更新 -->
+        <div class="tenc-teo-card" style="background: #f6f7f7;">
+            <h3>
+                <span class="dashicons dashicons-info" style="color: #2271b1;"></span>
+                <?php echo esc_html__('插件信息', 'tenc-teo'); ?>
+            </h3>
+            <p>
+                <strong><?php echo esc_html__('当前版本：', 'tenc-teo'); ?></strong> <?php echo esc_html(TENC_TEO_VERSION); ?><br>
+                <strong><?php echo esc_html__('GitHub：', 'tenc-teo'); ?></strong> 
+                <a href="https://github.com/<?php echo esc_attr(TENC_TEO_GITHUB_REPO); ?>" target="_blank">
+                    <?php echo esc_html(TENC_TEO_GITHUB_REPO); ?>
+                </a>
+            </p>
+            <?php
+            $update_info = tenc_teo_get_github_release_info();
+            if ($update_info && version_compare(TENC_TEO_VERSION, $update_info->version, '<')):
+            ?>
+                <div style="background: #d4edda; border-left: 3px solid #00a32a; padding: 12px; margin: 10px 0; border-radius: 3px;">
+                    <p style="margin: 0;">
+                        <strong style="color: #155724;">
+                            <span class="dashicons dashicons-update-alt" style="vertical-align: middle;"></span>
+                            <?php echo esc_html__('有新版本可用：', 'tenc-teo'); ?> v<?php echo esc_html($update_info->version); ?>
+                        </strong><br>
+                        <a href="<?php echo esc_url(admin_url('plugins.php')); ?>" class="button button-primary" style="margin-top: 10px;">
+                            <?php echo esc_html__('前往更新', 'tenc-teo'); ?>
+                        </a>
+                    </p>
+                </div>
+            <?php else: ?>
+                <p style="color: #00a32a;">
+                    <span class="dashicons dashicons-yes-alt"></span>
+                    <?php echo esc_html__('您使用的是最新版本', 'tenc-teo'); ?>
+                </p>
+            <?php endif; ?>
+        </div>
+
         <!-- 帮助信息 -->
         <div class="tenc-teo-card" style="background: #f6f7f7;">
             <h3>
@@ -585,7 +623,8 @@ function tenc_teo_render_settings_page() {
             <p>
                 <?php echo esc_html__('相关文档：', 'tenc-teo'); ?>
                 <a href="https://cloud.tencent.com/document/product/1552" target="_blank"><?php echo esc_html__('EdgeOne 产品文档', 'tenc-teo'); ?></a> | 
-                <a href="https://cloud.tencent.com/document/api/1552/70789" target="_blank"><?php echo esc_html__('API 参考', 'tenc-teo'); ?></a>
+                <a href="https://cloud.tencent.com/document/api/1552/70789" target="_blank"><?php echo esc_html__('API 参考', 'tenc-teo'); ?></a> | 
+                <a href="https://github.com/<?php echo esc_attr(TENC_TEO_GITHUB_REPO); ?>/issues" target="_blank"><?php echo esc_html__('问题反馈', 'tenc-teo'); ?></a>
             </p>
         </div>
     </div>
@@ -608,4 +647,182 @@ add_action('admin_post_tenc_teo_purge_all', function () {
         'tenc_teo_msg' => rawurlencode($msg),
     ), admin_url('options-general.php'));
     wp_safe_redirect($redirect); exit;
+});
+
+/** ========== GitHub 自动更新功能 ========== */
+// 检查更新
+add_filter('pre_set_site_transient_update_plugins', 'tenc_teo_check_for_update');
+
+function tenc_teo_check_for_update($transient) {
+    if (empty($transient->checked)) {
+        return $transient;
+    }
+
+    $plugin_slug = plugin_basename(TENC_TEO_PLUGIN_FILE);
+    $current_version = TENC_TEO_VERSION;
+
+    // 获取 GitHub 最新版本信息
+    $remote_info = tenc_teo_get_github_release_info();
+
+    if ($remote_info && version_compare($current_version, $remote_info->version, '<')) {
+        $plugin_info = array(
+            'slug' => dirname($plugin_slug),
+            'plugin' => $plugin_slug,
+            'new_version' => $remote_info->version,
+            'url' => $remote_info->homepage,
+            'package' => $remote_info->download_url,
+            'tested' => $remote_info->tested ?? '6.4',
+            'requires_php' => '7.4',
+        );
+
+        $transient->response[$plugin_slug] = (object) $plugin_info;
+    }
+
+    return $transient;
+}
+
+// 获取插件信息（用于更新页面）
+add_filter('plugins_api', 'tenc_teo_plugin_info', 20, 3);
+
+function tenc_teo_plugin_info($res, $action, $args) {
+    if ($action !== 'plugin_information') {
+        return $res;
+    }
+
+    $plugin_slug = dirname(plugin_basename(TENC_TEO_PLUGIN_FILE));
+
+    if ($args->slug !== $plugin_slug) {
+        return $res;
+    }
+
+    $remote_info = tenc_teo_get_github_release_info();
+
+    if (!$remote_info) {
+        return $res;
+    }
+
+    $res = new stdClass();
+    $res->name = 'Tencent EdgeOne Cache Manager';
+    $res->slug = $plugin_slug;
+    $res->version = $remote_info->version;
+    $res->tested = $remote_info->tested ?? '6.4';
+    $res->requires = '5.0';
+    $res->requires_php = '7.4';
+    $res->author = '<a href="https://github.com/Iconkop">Shinko</a>';
+    $res->homepage = $remote_info->homepage;
+    $res->download_link = $remote_info->download_url;
+    $res->sections = array(
+        'description' => $remote_info->description,
+        'changelog' => $remote_info->changelog,
+    );
+
+    return $res;
+}
+
+// 从 GitHub 获取最新版本信息
+function tenc_teo_get_github_release_info() {
+    $transient_key = 'tenc_teo_github_release';
+    $cached = get_transient($transient_key);
+
+    if ($cached !== false) {
+        return $cached;
+    }
+
+    $api_url = sprintf('https://api.github.com/repos/%s/releases/latest', TENC_TEO_GITHUB_REPO);
+    
+    $response = wp_remote_get($api_url, array(
+        'timeout' => 10,
+        'headers' => array(
+            'Accept' => 'application/vnd.github.v3+json',
+        ),
+    ));
+
+    if (is_wp_error($response)) {
+        return false;
+    }
+
+    $body = wp_remote_retrieve_body($response);
+    $data = json_decode($body);
+
+    if (empty($data) || !isset($data->tag_name)) {
+        return false;
+    }
+
+    // 查找 teo-cache-purge 的 zip 文件
+    $download_url = '';
+    if (!empty($data->assets)) {
+        foreach ($data->assets as $asset) {
+            if (strpos($asset->name, 'teo-cache-purge') !== false && strpos($asset->name, '.zip') !== false) {
+                $download_url = $asset->browser_download_url;
+                break;
+            }
+        }
+    }
+
+    // 如果没有找到专门的 zip，使用源码 zip
+    if (empty($download_url)) {
+        $download_url = $data->zipball_url;
+    }
+
+    $info = new stdClass();
+    $info->version = ltrim($data->tag_name, 'v');
+    $info->download_url = $download_url;
+    $info->homepage = sprintf('https://github.com/%s', TENC_TEO_GITHUB_REPO);
+    $info->description = $data->body ?? '腾讯云 EdgeOne 缓存管理插件';
+    $info->changelog = $data->body ?? '';
+    $info->tested = '6.4';
+
+    // 缓存 12 小时
+    set_transient($transient_key, $info, 12 * HOUR_IN_SECONDS);
+
+    return $info;
+}
+
+// 添加查看更新详情链接
+add_filter('plugin_row_meta', 'tenc_teo_plugin_row_meta', 10, 2);
+
+function tenc_teo_plugin_row_meta($links, $file) {
+    if ($file === plugin_basename(TENC_TEO_PLUGIN_FILE)) {
+        $new_links = array(
+            'github' => sprintf(
+                '<a href="https://github.com/%s" target="_blank">%s</a>',
+                TENC_TEO_GITHUB_REPO,
+                __('GitHub', 'tenc-teo')
+            ),
+            'check_update' => sprintf(
+                '<a href="%s">%s</a>',
+                wp_nonce_url(admin_url('admin-post.php?action=tenc_teo_check_update'), 'tenc_teo_check_update'),
+                __('检查更新', 'tenc-teo')
+            ),
+        );
+        $links = array_merge($links, $new_links);
+    }
+    return $links;
+}
+
+// 手动检查更新
+add_action('admin_post_tenc_teo_check_update', function() {
+    if (!current_user_can('update_plugins')) {
+        wp_die(__('权限不足。', 'tenc-teo'));
+    }
+    check_admin_referer('tenc_teo_check_update');
+
+    // 清除缓存
+    delete_transient('tenc_teo_github_release');
+    delete_site_transient('update_plugins');
+
+    // 强制检查更新
+    wp_update_plugins();
+
+    wp_safe_redirect(admin_url('plugins.php?tenc_teo_update_checked=1'));
+    exit;
+});
+
+// 显示检查更新的提示
+add_action('admin_notices', function() {
+    if (isset($_GET['tenc_teo_update_checked'])) {
+        echo '<div class="notice notice-success is-dismissible"><p>' . 
+             esc_html__('已检查更新。如有新版本将在插件列表中显示。', 'tenc-teo') . 
+             '</p></div>';
+    }
 });

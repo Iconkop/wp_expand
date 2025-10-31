@@ -251,12 +251,30 @@ add_action('woocommerce_update_product', function($product_id) {
 
 ---
 
+## 🔄 自动更新
+
+### 插件更新方式
+插件已集成 GitHub Release 自动更新功能：
+
+1. **自动检测**: 系统会自动检查 GitHub 上的最新版本
+2. **更新提示**: 在插件列表和设置页面显示更新通知
+3. **一键更新**: 直接在 WordPress 后台更新
+
+### 手动检查更新
+- 方式1: 插件列表 → 点击 "检查更新" 链接
+- 方式2: 设置页面 → 查看 "插件信息" 卡片
+
+详细说明请查看 [UPDATE-GUIDE.md](UPDATE-GUIDE.md)
+
+---
+
 ## ✨ 下一步
 
 配置完成后，您可以：
 1. 📝 查看 [FEATURES.md](FEATURES.md) 了解详细功能
 2. 📋 查看 [CHANGELOG.md](CHANGELOG.md) 了解版本历史
-3. 🎯 开始使用插件管理缓存
+3. 🔄 查看 [UPDATE-GUIDE.md](UPDATE-GUIDE.md) 了解更新功能
+4. 🎯 开始使用插件管理缓存
 
 ---
 

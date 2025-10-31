@@ -43,8 +43,8 @@
 ---
 
 ### 3. Tencent EdgeOne Cache Manager (腾讯 EdgeOne 缓存管理器)
-**版本:** 1.0.3  
-**作者:** RV
+**版本:** 1.0.4  
+**作者:** Shinko
 
 专为腾讯云 EdgeOne CDN 设计的缓存管理插件，使用官方 PHP SDK。
 
@@ -73,7 +73,9 @@ composer require tencentcloud/teo
 - **Zone ID**: EdgeOne 站点 ID
 - **Default Host**: 默认域名
 
-#### 新功能亮点 (v1.0.3)
+#### 新功能亮点 (v1.0.4)
+- ✅ **GitHub 自动更新**: 自动检测 GitHub Release 最新版本并提示更新
+- ✅ **一键更新**: 直接在 WordPress 插件页面更新到最新版本
 - ✅ **测试连接**: 在配置页面点击"测试连接"按钮，实时验证 API 配置
 - ✅ **配置向导**: 提供完整的配置说明和腾讯云控制台链接
 - ✅ **策略说明**: 可视化展示四种缓存清理策略的使用场景
