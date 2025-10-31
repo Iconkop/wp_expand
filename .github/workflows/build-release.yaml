@@ -18,7 +18,7 @@ jobs:
       
       - name: Setup environment
         run: |
-          mkdir -p releases
+          mkdir -p releases temp
           echo "RELEASE_TAG=$(date +'%Y%m%d-%H%M%S')" >> $GITHUB_ENV
       
       - name: Process plugins
@@ -42,11 +42,21 @@ jobs:
                 if [ -n "$version" ]; then
                   echo "Found version: $version for $folder"
                   
-                  # 创建 zip 文件
+                  # 创建临时目录结构
+                  temp_dir="temp/${folder}"
+                  mkdir -p "$temp_dir"
+                  
+                  # 复制所有文件到临时目录（保持插件目录结构）
+                  cp -r "$folder"/* "$temp_dir/"
+                  
+                  # 创建 zip 文件（包含插件目录）
                   zip_name="${folder}-${version}.zip"
-                  cd "$folder"
-                  zip -r "../releases/${zip_name}" . -x "*.git*" "*.DS_Store"
+                  cd "temp"
+                  zip -r "../releases/${zip_name}" "$folder" -x "*.git*" "*.DS_Store"
                   cd ..
+                  
+                  # 清理临时文件
+                  rm -rf "temp/${folder}"
                   
                   RELEASE_FILES="${RELEASE_FILES}releases/${zip_name},"
                   RELEASE_NOTES="${RELEASE_NOTES}- **${folder}**: v${version}\n"
@@ -80,6 +90,10 @@ jobs:
           prerelease: false
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      
+      - name: Cleanup
+        run: |
+          rm -rf releases temp
       
       - name: Summary
         run: |
