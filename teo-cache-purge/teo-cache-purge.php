@@ -12,7 +12,7 @@ if (!defined('ABSPATH')) { exit; }
 
 define('TENC_TEO_SLUG', 'tencent-edgeone-cache');
 define('TENC_TEO_OPT_KEY', 'tenc_teo_options');
-define('TENC_TEO_VERSION', '1.0.5');
+define('TENC_TEO_VERSION', '1.0.6');
 define('TENC_TEO_GITHUB_REPO', 'Iconkop/wp_expand');
 define('TENC_TEO_PLUGIN_FILE', __FILE__);
 
