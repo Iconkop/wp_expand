@@ -2,50 +2,61 @@ name: Build and Release Plugins
 
 on:
   push:
-    branches: [ main ] # 仅在main分支推送时触发，正确
-    paths: # 仅当三个目标文件夹有变动时运行，避免无效触发，正确
+    branches: [ main ]
+    paths:
       - 'custom-code-manager/**'
       - 'smart-sitemap/**'
       - 'teo-cache-purge/**'
 
 jobs:
   build:
-    runs-on: ubuntu-latest # 基础环境正确，兼容zip和grep命令
+    runs-on: ubuntu-latest
     steps:
-      # 1. 拉取代码：使用最新v4版本，正确
       - name: Checkout code
         uses: actions/checkout@v4
 
-      # 2. 打包custom-code-manager：变量名VER_CCM无拼写错误，版本提取命令正确
+      # 打包 custom-code-manager
       - name: Build custom-code-manager
         run: |
-          VER=$(grep -oP '(?<=Version: ).+' custom-code-manager/custom-code-manager.php | head -n1 | xargs)
-          cd custom-code-manager && zip -r ../custom-code-manager-$VER.zip . # 打包路径正确，无嵌套目录
-          echo "VER_CCM=$VER" >> $GITHUB_ENV # 环境变量设置语法正确
+          VER=$(grep '^Version:' custom-code-manager/custom-code-manager.php | head -n1 | cut -d: -f2 | xargs)
+          if [ -z "$VER" ]; then
+            echo "Error: Cannot extract version from custom-code-manager."
+            exit 1
+          fi
+          cd custom-code-manager && zip -r ../custom-code-manager-$VER.zip . -x "*.git*"
+          echo "VER_CCM=$VER" >> $GITHUB_ENV
 
-      # 3. 打包smart-sitemap：逻辑与上一步一致，无错误
+      # 打包 smart-sitemap
       - name: Build smart-sitemap
         run: |
-          VER=$(grep -oP '(?<=Version: ).+' smart-sitemap/smart-sitemap.php | head -n1 | xargs)
-          cd smart-sitemap && zip -r ../smart-sitemap-$VER.zip .
+          VER=$(grep '^Version:' smart-sitemap/smart-sitemap.php | head -n1 | cut -d: -f2 | xargs)
+          if [ -z "$VER" ]; then
+            echo "Error: Cannot extract version from smart-sitemap."
+            exit 1
+          fi
+          cd smart-sitemap && zip -r ../smart-sitemap-$VER.zip . -x "*.git*"
           echo "VER_SS=$VER" >> $GITHUB_ENV
 
-      # 4. 打包teo-cache-purge：无多余"s"，文件路径与文件夹名完全匹配，正确
+      # 打包 teo-cache-purge
       - name: Build teo-cache-purge
         run: |
-          VER=$(grep -oP '(?<=Version: ).+' teo-cache-purge/teo-cache-purge.php | head -n1 | xargs)
-          cd teo-cache-purge && zip -r ../teo-cache-purge-$VER.zip .
+          VER=$(grep '^Version:' teo-cache-purge/teo-cache-purge.php | head -n1 | cut -d: -f2 | xargs)
+          if [ -z "$VER" ]; then
+            echo "Error: Cannot extract version from teo-cache-purge."
+            exit 1
+          fi
+          cd teo-cache-purge && zip -r ../teo-cache-purge-$VER.zip . -x "*.git*"
           echo "VER_TEO=$VER" >> $GITHUB_ENV
 
-      # 5. 创建Release：变量引用格式${{ env.变量名 }}完全正确，无"env-"错误，文件路径匹配
-      - name: Create and upload Release
-        uses: softprops/action-gh-release@v2 # 主流Release动作，稳定可靠
+      # 创建Release（修复files列表格式：每个文件前加-，且对齐）
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
         with:
-          tag_name: v${{ env.VER_CCM }}_${{ env.VER_SS }}_${{ env.VER_TEO }} # 标签名无语法错误
-          release_name: Plugins Release ${{ env.VER_CCM }} · ${{ env.VER_SS }} · ${{ env.VER_TEO }} # 名称显示正常
-          files: # 待上传文件路径与打包结果完全一致，正确
+          tag_name: v${{ env.VER_CCM }}_${{ env.VER_SS }}_${{ env.VER_TEO }}
+          release_name: Plugins Release ${{ env.VER_CCM }} · ${{ env.VER_SS }} · ${{ env.VER_TEO }}
+          files:
             - custom-code-manager-${{ env.VER_CCM }}.zip
             - smart-sitemap-${{ env.VER_SS }}.zip
             - teo-cache-purge-${{ env.VER_TEO }}.zip
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }} # 令牌引用正确，无需额外配置
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
