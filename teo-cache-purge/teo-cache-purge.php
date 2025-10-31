@@ -2,7 +2,7 @@
 /**
  * Plugin Name: Tencent EdgeOne Cache Manager
  * Description: EO 缓存清理：单篇/更新用 purge_url，首次发布用 purge_host(invalidate)，全站 purge_all(invalidate)；使用官方 PHP SDK。
- * Version:     1.0.4
+ * Version:     1.0.5
  * Author:      Shinko
  * Text Domain: tenc-teo
  * Plugin URI:  https://github.com/Iconkop/wp_expand
@@ -12,7 +12,7 @@ if (!defined('ABSPATH')) { exit; }
 
 define('TENC_TEO_SLUG', 'tencent-edgeone-cache');
 define('TENC_TEO_OPT_KEY', 'tenc_teo_options');
-define('TENC_TEO_VERSION', '1.0.4');
+define('TENC_TEO_VERSION', '1.0.5');
 define('TENC_TEO_GITHUB_REPO', 'Iconkop/wp_expand');
 define('TENC_TEO_PLUGIN_FILE', __FILE__);
 
@@ -106,32 +106,73 @@ function tenc_teo_create_purge_task(array $params) {
 
 /** ========== 具体动作：按照你的三条规则实现 ========== */
 // 1) 单篇 & 已发布文章更新 → purge_url（不带 Method）
-function tenc_teo_purge_url(array $urls) {
+function tenc_teo_purge_url(array $urls, $log_history = true) {
     $urls = array_values(array_unique(array_filter($urls)));
     if (!$urls) throw new Exception('无可用 URL。');
-    return tenc_teo_create_purge_task(array(
-        'Type'    => 'purge_url',
-        'Targets' => $urls,
-    ));
+    
+    try {
+        $result = tenc_teo_create_purge_task(array(
+            'Type'    => 'purge_url',
+            'Targets' => $urls,
+        ));
+        
+        if ($log_history) {
+            tenc_teo_add_history('purge_url', implode(', ', $urls), true, 'TaskId: ' . ($result['TaskId'] ?? 'N/A'));
+        }
+        
+        return $result;
+    } catch (\Throwable $e) {
+        if ($log_history) {
+            tenc_teo_add_history('purge_url', implode(', ', $urls), false, $e->getMessage());
+        }
+        throw $e;
+    }
 }
 
 // 2) 首次发布 → purge_host + Method=invalidate
-function tenc_teo_purge_host_invalidate(array $hosts) {
+function tenc_teo_purge_host_invalidate(array $hosts, $log_history = true) {
     $hosts = array_values(array_unique(array_filter($hosts)));
     if (!$hosts) throw new Exception('无可用 Host。');
-    return tenc_teo_create_purge_task(array(
-        'Type'    => 'purge_host',
-        'Targets' => $hosts,
-        'Method'  => 'invalidate',
-    ));
+    
+    try {
+        $result = tenc_teo_create_purge_task(array(
+            'Type'    => 'purge_host',
+            'Targets' => $hosts,
+            'Method'  => 'invalidate',
+        ));
+        
+        if ($log_history) {
+            tenc_teo_add_history('purge_host', implode(', ', $hosts), true, 'TaskId: ' . ($result['TaskId'] ?? 'N/A'));
+        }
+        
+        return $result;
+    } catch (\Throwable $e) {
+        if ($log_history) {
+            tenc_teo_add_history('purge_host', implode(', ', $hosts), false, $e->getMessage());
+        }
+        throw $e;
+    }
 }
 
 // 3) 全站 → purge_all + Method=invalidate
-function tenc_teo_purge_all_invalidate() {
-    return tenc_teo_create_purge_task(array(
-        'Type'   => 'purge_all',
-        'Method' => 'invalidate',
-    ));
+function tenc_teo_purge_all_invalidate($log_history = true) {
+    try {
+        $result = tenc_teo_create_purge_task(array(
+            'Type'   => 'purge_all',
+            'Method' => 'invalidate',
+        ));
+        
+        if ($log_history) {
+            tenc_teo_add_history('purge_all', __('全站', 'tenc-teo'), true, 'TaskId: ' . ($result['TaskId'] ?? 'N/A'));
+        }
+        
+        return $result;
+    } catch (\Throwable $e) {
+        if ($log_history) {
+            tenc_teo_add_history('purge_all', __('全站', 'tenc-teo'), false, $e->getMessage());
+        }
+        throw $e;
+    }
 }
 
 /** ========== 业务钩子：状态流转 ========== */
@@ -220,68 +261,48 @@ function tenc_teo_admin_notice_from_query() {
 }
 add_action('admin_notices', 'tenc_teo_admin_notice_from_query');
 
-/** ========== 测试连接功能 ========== */
-add_action('admin_post_tenc_teo_test_connection', function () {
-    if (!current_user_can('manage_options')) wp_die(__('无权操作。', 'tenc-teo'));
-    check_admin_referer('tenc_teo_test_connection');
-
-    $ok = true; $msg = '';
-    try {
-        if (!tenc_teo_sdk_available()) {
-            throw new Exception(__('SDK 未安装，请执行：composer require tencentcloud/teo', 'tenc-teo'));
-        }
-
-        $opt = tenc_teo_get_options();
-        foreach (array('secret_id','secret_key','zone_id') as $k) {
-            if (empty($opt[$k])) {
-                throw new Exception(sprintf(__('配置缺失：%s，请先完善配置。', 'tenc-teo'), $k));
-            }
-        }
-
-        // 测试连接：调用 DescribeZones 接口获取站点信息
-        $client = tenc_teo_client();
-        $reqClass = 'TencentCloud\Teo\V20220901\Models\DescribeZonesRequest';
-        $req = new $reqClass();
-        
-        $params = array(
-            'Filters' => array(
-                array(
-                    'Name' => 'zone-id',
-                    'Values' => array($opt['zone_id'])
-                )
-            )
-        );
-        $req->fromJsonString(wp_json_encode($params));
-        $resp = $client->DescribeZones($req);
-        
-        if (method_exists($resp, 'getTotalCount') && $resp->getTotalCount() > 0) {
-            $zones = method_exists($resp, 'getZones') ? $resp->getZones() : array();
-            if (!empty($zones)) {
-                $zone = $zones[0];
-                $zoneName = method_exists($zone, 'getZoneName') ? $zone->getZoneName() : 'N/A';
-                $zoneStatus = method_exists($zone, 'getStatus') ? $zone->getStatus() : 'N/A';
-                $msg = sprintf(
-                    __('✅ 连接成功！站点信息：%s (状态: %s)', 'tenc-teo'),
-                    $zoneName,
-                    $zoneStatus
-                );
-            } else {
-                $msg = __('✅ API 连接成功，但未找到站点详细信息。', 'tenc-teo');
-            }
-        } else {
-            throw new Exception(__('未找到对应的 Zone ID，请检查配置是否正确。', 'tenc-teo'));
-        }
-    } catch (\Throwable $e) {
-        $ok = false; 
-        $msg = __('❌ 连接失败：', 'tenc-teo') . $e->getMessage();
-    }
+/** ========== 历史记录功能 ========== */
+// 添加历史记录
+function tenc_teo_add_history($type, $target, $success, $message = '') {
+    $history = get_option('tenc_teo_history', array());
     
-    $redirect = add_query_arg(array(
+    $record = array(
+        'type' => $type, // purge_url, purge_host, purge_all
+        'target' => $target, // URL、域名或 'all'
+        'success' => $success, // true/false
+        'message' => $message,
+        'time' => current_time('mysql'),
+        'timestamp' => time()
+    );
+    
+    // 添加到数组开头
+    array_unshift($history, $record);
+    
+    // 只保留最近100条记录
+    $history = array_slice($history, 0, 100);
+    
+    update_option('tenc_teo_history', $history);
+}
+
+// 获取历史记录
+function tenc_teo_get_history($limit = 20) {
+    $history = get_option('tenc_teo_history', array());
+    return array_slice($history, 0, $limit);
+}
+
+// 清除历史记录
+add_action('admin_post_tenc_teo_clear_history', function() {
+    if (!current_user_can('manage_options')) wp_die(__('权限不足。', 'tenc-teo'));
+    check_admin_referer('tenc_teo_clear_history');
+    
+    delete_option('tenc_teo_history');
+    
+    wp_safe_redirect(add_query_arg(array(
         'page' => TENC_TEO_SLUG,
-        'tenc_teo_notice' => $ok ? 'success' : 'error',
-        'tenc_teo_msg' => rawurlencode($msg),
-    ), admin_url('options-general.php'));
-    wp_safe_redirect($redirect); exit;
+        'tenc_teo_notice' => 'success',
+        'tenc_teo_msg' => rawurlencode(__('历史记录已清空。', 'tenc-teo')),
+    ), admin_url('options-general.php')));
+    exit;
 });
 
 /** ========== 加载管理页面样式 ========== */
@@ -377,6 +398,16 @@ add_action('admin_enqueue_scripts', function($hook) {
         .tenc-teo-danger-zone h2 {
             color: #d63638;
         }
+        .tenc-teo-card table.wp-list-table {
+            border: 1px solid #c3c4c7;
+        }
+        .tenc-teo-card table.wp-list-table th {
+            font-weight: 600;
+            background: #f6f7f7;
+        }
+        .tenc-teo-card table.wp-list-table td {
+            padding: 12px 10px;
+        }
         @media screen and (max-width: 782px) {
             .tenc-teo-button-group {
                 flex-direction: column;
@@ -387,6 +418,10 @@ add_action('admin_enqueue_scripts', function($hook) {
             }
             .tenc-teo-info-grid {
                 grid-template-columns: 1fr;
+            }
+            .tenc-teo-card table.wp-list-table th:nth-child(4),
+            .tenc-teo-card table.wp-list-table td:nth-child(4) {
+                display: none;
             }
         }
     ');
@@ -500,17 +535,6 @@ function tenc_teo_render_settings_page() {
                 
                 <?php submit_button(__('保存设置', 'tenc-teo'), 'primary', 'submit', true); ?>
             </form>
-            
-            <?php if ($sdk_ok): ?>
-                <form method="post" action="<?php echo esc_url(admin_url('admin-post.php')); ?>" style="margin-top: 10px;">
-                    <?php wp_nonce_field('tenc_teo_test_connection'); ?>
-                    <input type="hidden" name="action" value="tenc_teo_test_connection">
-                    <button type="submit" class="button button-secondary">
-                        <span class="dashicons dashicons-update" style="vertical-align: middle;"></span>
-                        <?php echo esc_html__('测试连接', 'tenc-teo'); ?>
-                    </button>
-                </form>
-            <?php endif; ?>
         </div>
 
         <!-- 缓存清理策略说明 -->
@@ -576,6 +600,97 @@ function tenc_teo_render_settings_page() {
                     <?php echo esc_html__('使用场景：网站主题更换、重大功能更新、紧急问题修复等', 'tenc-teo'); ?>
                 </p>
             </form>
+        </div>
+
+        <!-- 历史记录 -->
+        <div class="tenc-teo-card">
+            <h2>
+                <span class="dashicons dashicons-list-view" style="color: #2271b1;"></span>
+                <?php echo esc_html__('操作历史', 'tenc-teo'); ?>
+            </h2>
+            
+            <?php
+            $history = tenc_teo_get_history(20);
+            if (!empty($history)):
+            ?>
+                <div style="overflow-x: auto;">
+                    <table class="wp-list-table widefat fixed striped" style="margin-top: 15px;">
+                        <thead>
+                            <tr>
+                                <th style="width: 100px;"><?php echo esc_html__('类型', 'tenc-teo'); ?></th>
+                                <th><?php echo esc_html__('目标', 'tenc-teo'); ?></th>
+                                <th style="width: 80px;"><?php echo esc_html__('状态', 'tenc-teo'); ?></th>
+                                <th style="width: 160px;"><?php echo esc_html__('时间', 'tenc-teo'); ?></th>
+                                <th><?php echo esc_html__('详情', 'tenc-teo'); ?></th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <?php foreach ($history as $record): ?>
+                                <tr>
+                                    <td>
+                                        <?php
+                                        $type_labels = array(
+                                            'purge_url' => '单篇清理',
+                                            'purge_host' => '域名清理',
+                                            'purge_all' => '全站清理'
+                                        );
+                                        echo '<span class="dashicons dashicons-' . 
+                                             ($record['type'] === 'purge_all' ? 'admin-site-alt3' : 
+                                              ($record['type'] === 'purge_host' ? 'admin-home' : 'admin-page')) . 
+                                             '" style="vertical-align: middle;"></span> ';
+                                        echo esc_html($type_labels[$record['type']] ?? $record['type']);
+                                        ?>
+                                    </td>
+                                    <td style="word-break: break-all; max-width: 300px;">
+                                        <?php echo esc_html($record['target']); ?>
+                                    </td>
+                                    <td>
+                                        <?php if ($record['success']): ?>
+                                            <span style="color: #00a32a;">
+                                                <span class="dashicons dashicons-yes-alt" style="vertical-align: middle;"></span>
+                                                <?php echo esc_html__('成功', 'tenc-teo'); ?>
+                                            </span>
+                                        <?php else: ?>
+                                            <span style="color: #d63638;">
+                                                <span class="dashicons dashicons-dismiss" style="vertical-align: middle;"></span>
+                                                <?php echo esc_html__('失败', 'tenc-teo'); ?>
+                                            </span>
+                                        <?php endif; ?>
+                                    </td>
+                                    <td>
+                                        <?php 
+                                        $time_diff = human_time_diff(strtotime($record['time']), current_time('timestamp'));
+                                        echo esc_html(sprintf(__('%s前', 'tenc-teo'), $time_diff));
+                                        ?>
+                                        <br>
+                                        <small style="color: #8c8f94;"><?php echo esc_html(date_i18n('Y-m-d H:i', strtotime($record['time']))); ?></small>
+                                    </td>
+                                    <td style="font-size: 12px; color: #50575e;">
+                                        <?php echo esc_html($record['message']); ?>
+                                    </td>
+                                </tr>
+                            <?php endforeach; ?>
+                        </tbody>
+                    </table>
+                </div>
+                
+                <form method="post" action="<?php echo esc_url(admin_url('admin-post.php')); ?>" style="margin-top: 15px;">
+                    <?php wp_nonce_field('tenc_teo_clear_history'); ?>
+                    <input type="hidden" name="action" value="tenc_teo_clear_history">
+                    <button type="submit" class="button" onclick="return confirm('<?php echo esc_js(__('确定要清空所有历史记录吗？', 'tenc-teo')); ?>');">
+                        <span class="dashicons dashicons-trash" style="vertical-align: middle;"></span>
+                        <?php echo esc_html__('清空历史记录', 'tenc-teo'); ?>
+                    </button>
+                    <p class="description">
+                        <?php echo esc_html__('显示最近20条记录，系统最多保留100条。', 'tenc-teo'); ?>
+                    </p>
+                </form>
+            <?php else: ?>
+                <p style="color: #8c8f94; text-align: center; padding: 30px;">
+                    <span class="dashicons dashicons-info" style="font-size: 48px; opacity: 0.3;"></span><br>
+                    <?php echo esc_html__('暂无操作记录', 'tenc-teo'); ?>
+                </p>
+            <?php endif; ?>
         </div>
 
         <!-- 插件信息和更新 -->
