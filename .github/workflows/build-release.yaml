@@ -1,62 +1,87 @@
-name: Build and Release Plugins
+name: Auto Package and Release
 
 on:
   push:
-    branches: [ main ]
-    paths:
-      - 'custom-code-manager/**'
-      - 'smart-sitemap/**'
-      - 'teo-cache-purge/**'
+    branches:
+      - main
 
 jobs:
-  build:
+  build-and-release:
     runs-on: ubuntu-latest
+    
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
-
-      # 打包 custom-code-manager
-      - name: Build custom-code-manager
+      
+      - name: Setup environment
         run: |
-          VER=$(grep '^Version:' custom-code-manager/custom-code-manager.php | head -n1 | cut -d: -f2 | xargs)
-          if [ -z "$VER" ]; then
-            echo "Error: Cannot extract version from custom-code-manager."
-            exit 1
-          fi
-          cd custom-code-manager && zip -r ../custom-code-manager-$VER.zip . -x "*.git*"
-          echo "VER_CCM=$VER" >> $GITHUB_ENV
-
-      # 打包 smart-sitemap
-      - name: Build smart-sitemap
+          mkdir -p releases
+          echo "RELEASE_TAG=$(date +'%Y%m%d-%H%M%S')" >> $GITHUB_ENV
+      
+      - name: Process plugins
+        id: process
         run: |
-          VER=$(grep '^Version:' smart-sitemap/smart-sitemap.php | head -n1 | cut -d: -f2 | xargs)
-          if [ -z "$VER" ]; then
-            echo "Error: Cannot extract version from smart-sitemap."
-            exit 1
-          fi
-          cd smart-sitemap && zip -r ../smart-sitemap-$VER.zip . -x "*.git*"
-          echo "VER_SS=$VER" >> $GITHUB_ENV
-
-      # 打包 teo-cache-purge
-      - name: Build teo-cache-purge
-        run: |
-          VER=$(grep '^Version:' teo-cache-purge/teo-cache-purge.php | head -n1 | cut -d: -f2 | xargs)
-          if [ -z "$VER" ]; then
-            echo "Error: Cannot extract version from teo-cache-purge."
-            exit 1
-          fi
-          cd teo-cache-purge && zip -r ../teo-cache-purge-$VER.zip . -x "*.git*"
-          echo "VER_TEO=$VER" >> $GITHUB_ENV
-
-      # 创建Release（修复files列表格式：每个文件前加-，且对齐）
+          FOLDERS=("custom-code-manager" "smart-sitemap" "teo-cache-purge")
+          RELEASE_FILES=""
+          RELEASE_NOTES="## 插件版本\n\n"
+          
+          for folder in "${FOLDERS[@]}"; do
+            if [ -d "$folder" ]; then
+              echo "Processing $folder..."
+              
+              # 查找 PHP 文件并提取版本号
+              php_file="${folder}/${folder}.php"
+              
+              if [ -f "$php_file" ]; then
+                # 提取 Version 字段
+                version=$(grep -i "^ \* Version:" "$php_file" | head -1 | sed 's/.*Version: *\([0-9.]*\).*/\1/')
+                
+                if [ -n "$version" ]; then
+                  echo "Found version: $version for $folder"
+                  
+                  # 创建 zip 文件
+                  zip_name="${folder}-${version}.zip"
+                  cd "$folder"
+                  zip -r "../releases/${zip_name}" . -x "*.git*" "*.DS_Store"
+                  cd ..
+                  
+                  RELEASE_FILES="${RELEASE_FILES}releases/${zip_name},"
+                  RELEASE_NOTES="${RELEASE_NOTES}- **${folder}**: v${version}\n"
+                else
+                  echo "Warning: Version not found in $php_file"
+                fi
+              else
+                echo "Warning: $php_file not found"
+              fi
+            else
+              echo "Warning: Directory $folder not found"
+            fi
+          done
+          
+          # 移除最后的逗号
+          RELEASE_FILES=${RELEASE_FILES%,}
+          
+          echo "release_files=$RELEASE_FILES" >> $GITHUB_OUTPUT
+          echo "release_notes<<EOF" >> $GITHUB_OUTPUT
+          echo -e "$RELEASE_NOTES" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+      
       - name: Create Release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v1
         with:
-          tag_name: v${{ env.VER_CCM }}_${{ env.VER_SS }}_${{ env.VER_TEO }}
-          release_name: Plugins Release ${{ env.VER_CCM }} · ${{ env.VER_SS }} · ${{ env.VER_TEO }}
-          files:
-            - custom-code-manager-${{ env.VER_CCM }}.zip
-            - smart-sitemap-${{ env.VER_SS }}.zip
-            - teo-cache-purge-${{ env.VER_TEO }}.zip
+          tag_name: release-${{ env.RELEASE_TAG }}
+          name: Release ${{ env.RELEASE_TAG }}
+          body: ${{ steps.process.outputs.release_notes }}
+          files: ${{ steps.process.outputs.release_files }}
+          draft: false
+          prerelease: false
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      
+      - name: Summary
+        run: |
+          echo "## Release Created Successfully! 🎉" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Tag**: release-${{ env.RELEASE_TAG }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "${{ steps.process.outputs.release_notes }}" >> $GITHUB_STEP_SUMMARY
