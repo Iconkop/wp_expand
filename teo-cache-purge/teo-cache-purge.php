@@ -2,8 +2,8 @@
 /**
  * Plugin Name: Tencent EdgeOne Cache Manager
  * Description: EO 缓存清理：单篇/更新用 purge_url，首次发布用 purge_host(invalidate)，全站 purge_all(invalidate)；使用官方 PHP SDK。
- * Version:     1.0.2
- * Author:      RV
+ * Version:     1.0.4
+ * Author:      Shinko
  * Text Domain: tenc-teo
  */
 
@@ -216,55 +216,378 @@ function tenc_teo_admin_notice_from_query() {
 }
 add_action('admin_notices', 'tenc_teo_admin_notice_from_query');
 
+/** ========== 测试连接功能 ========== */
+add_action('admin_post_tenc_teo_test_connection', function () {
+    if (!current_user_can('manage_options')) wp_die(__('无权操作。', 'tenc-teo'));
+    check_admin_referer('tenc_teo_test_connection');
+
+    $ok = true; $msg = '';
+    try {
+        if (!tenc_teo_sdk_available()) {
+            throw new Exception(__('SDK 未安装，请执行：composer require tencentcloud/teo', 'tenc-teo'));
+        }
+
+        $opt = tenc_teo_get_options();
+        foreach (array('secret_id','secret_key','zone_id') as $k) {
+            if (empty($opt[$k])) {
+                throw new Exception(sprintf(__('配置缺失：%s，请先完善配置。', 'tenc-teo'), $k));
+            }
+        }
+
+        // 测试连接：调用 DescribeZones 接口获取站点信息
+        $client = tenc_teo_client();
+        $reqClass = 'TencentCloud\Teo\V20220901\Models\DescribeZonesRequest';
+        $req = new $reqClass();
+        
+        $params = array(
+            'Filters' => array(
+                array(
+                    'Name' => 'zone-id',
+                    'Values' => array($opt['zone_id'])
+                )
+            )
+        );
+        $req->fromJsonString(wp_json_encode($params));
+        $resp = $client->DescribeZones($req);
+        
+        if (method_exists($resp, 'getTotalCount') && $resp->getTotalCount() > 0) {
+            $zones = method_exists($resp, 'getZones') ? $resp->getZones() : array();
+            if (!empty($zones)) {
+                $zone = $zones[0];
+                $zoneName = method_exists($zone, 'getZoneName') ? $zone->getZoneName() : 'N/A';
+                $zoneStatus = method_exists($zone, 'getStatus') ? $zone->getStatus() : 'N/A';
+                $msg = sprintf(
+                    __('✅ 连接成功！站点信息：%s (状态: %s)', 'tenc-teo'),
+                    $zoneName,
+                    $zoneStatus
+                );
+            } else {
+                $msg = __('✅ API 连接成功，但未找到站点详细信息。', 'tenc-teo');
+            }
+        } else {
+            throw new Exception(__('未找到对应的 Zone ID，请检查配置是否正确。', 'tenc-teo'));
+        }
+    } catch (\Throwable $e) {
+        $ok = false; 
+        $msg = __('❌ 连接失败：', 'tenc-teo') . $e->getMessage();
+    }
+    
+    $redirect = add_query_arg(array(
+        'page' => TENC_TEO_SLUG,
+        'tenc_teo_notice' => $ok ? 'success' : 'error',
+        'tenc_teo_msg' => rawurlencode($msg),
+    ), admin_url('options-general.php'));
+    wp_safe_redirect($redirect); exit;
+});
+
+/** ========== 加载管理页面样式 ========== */
+add_action('admin_enqueue_scripts', function($hook) {
+    if ('settings_page_' . TENC_TEO_SLUG !== $hook) return;
+    
+    wp_add_inline_style('common', '
+        .tenc-teo-card {
+            background: #fff;
+            border: 1px solid #c3c4c7;
+            border-radius: 4px;
+            padding: 20px;
+            margin: 20px 0;
+            box-shadow: 0 1px 1px rgba(0,0,0,.04);
+        }
+        .tenc-teo-card h2 {
+            margin-top: 0;
+            padding-bottom: 10px;
+            border-bottom: 1px solid #dcdcde;
+            font-size: 18px;
+        }
+        .tenc-teo-card h3 {
+            font-size: 14px;
+            margin: 15px 0 10px;
+            color: #50575e;
+        }
+        .tenc-teo-status-badge {
+            display: inline-block;
+            padding: 3px 8px;
+            border-radius: 3px;
+            font-size: 12px;
+            font-weight: 600;
+            margin-left: 10px;
+        }
+        .tenc-teo-status-badge.success {
+            background: #d4edda;
+            color: #155724;
+        }
+        .tenc-teo-status-badge.error {
+            background: #f8d7da;
+            color: #721c24;
+        }
+        .tenc-teo-status-badge.warning {
+            background: #fff3cd;
+            color: #856404;
+        }
+        .tenc-teo-button-group {
+            display: flex;
+            gap: 10px;
+            flex-wrap: wrap;
+            margin-top: 15px;
+        }
+        .tenc-teo-info-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 15px;
+            margin: 15px 0;
+        }
+        .tenc-teo-info-item {
+            padding: 12px;
+            background: #f6f7f7;
+            border-left: 3px solid #2271b1;
+            border-radius: 3px;
+        }
+        .tenc-teo-info-item strong {
+            display: block;
+            font-size: 13px;
+            color: #1d2327;
+            margin-bottom: 5px;
+        }
+        .tenc-teo-info-item span {
+            font-size: 12px;
+            color: #50575e;
+        }
+        .tenc-teo-help-text {
+            background: #f0f6fc;
+            border-left: 3px solid #0073aa;
+            padding: 12px 15px;
+            margin: 15px 0;
+            font-size: 13px;
+            line-height: 1.6;
+        }
+        .tenc-teo-help-text code {
+            background: #fff;
+            padding: 2px 6px;
+            border-radius: 3px;
+            font-size: 12px;
+        }
+        .tenc-teo-danger-zone {
+            border-color: #dc3232;
+            border-left: 4px solid #dc3232;
+        }
+        .tenc-teo-danger-zone h2 {
+            color: #d63638;
+        }
+        @media screen and (max-width: 782px) {
+            .tenc-teo-button-group {
+                flex-direction: column;
+            }
+            .tenc-teo-button-group .button {
+                width: 100%;
+                text-align: center;
+            }
+            .tenc-teo-info-grid {
+                grid-template-columns: 1fr;
+            }
+        }
+    ');
+});
+
+/** ========== 设置页面渲染 ========== */
 function tenc_teo_render_settings_page() {
     if (!current_user_can('manage_options')) return;
-    $opt = tenc_teo_get_options(); ?>
+    $opt = tenc_teo_get_options();
+    $sdk_ok = tenc_teo_sdk_available();
+    $config_complete = !empty($opt['secret_id']) && !empty($opt['secret_key']) && !empty($opt['zone_id']);
+    ?>
     <div class="wrap">
-        <h1><?php echo esc_html__('EdgeOne 缓存管理', 'tenc-teo'); ?></h1>
+        <h1>
+            <span class="dashicons dashicons-cloud" style="font-size: 28px; vertical-align: middle; color: #2271b1;"></span>
+            <?php echo esc_html__('EdgeOne 缓存管理', 'tenc-teo'); ?>
+            <?php if ($sdk_ok && $config_complete): ?>
+                <span class="tenc-teo-status-badge success"><?php echo esc_html__('已配置', 'tenc-teo'); ?></span>
+            <?php elseif (!$sdk_ok): ?>
+                <span class="tenc-teo-status-badge error"><?php echo esc_html__('SDK 未安装', 'tenc-teo'); ?></span>
+            <?php else: ?>
+                <span class="tenc-teo-status-badge warning"><?php echo esc_html__('待配置', 'tenc-teo'); ?></span>
+            <?php endif; ?>
+        </h1>
 
-        <?php if (!tenc_teo_sdk_available()): ?>
-            <div class="notice notice-error"><p><?php echo esc_html__('未检测到 EO SDK。请在本插件目录执行：composer require tencentcloud/teo', 'tenc-teo'); ?></p></div>
+        <?php if (!$sdk_ok): ?>
+            <div class="notice notice-error">
+                <p>
+                    <strong><?php echo esc_html__('SDK 未安装', 'tenc-teo'); ?></strong><br>
+                    <?php echo esc_html__('请在插件目录执行以下命令安装依赖：', 'tenc-teo'); ?>
+                </p>
+                <p><code style="background: #f0f0f0; padding: 8px 12px; display: inline-block; border-radius: 3px;">cd <?php echo esc_html(plugin_dir_path(__FILE__)); ?> && composer require tencentcloud/teo</code></p>
+            </div>
         <?php endif; ?>
 
-        <form method="post" action="options.php" style="max-width:800px;">
-            <?php settings_fields(TENC_TEO_OPT_KEY); ?>
-            <table class="form-table" role="presentation">
-                <tr>
-                    <th scope="row"><label for="secret_id">SecretId</label></th>
-                    <td><input type="text" id="secret_id" name="<?php echo esc_attr(TENC_TEO_OPT_KEY); ?>[secret_id]" class="regular-text" value="<?php echo esc_attr($opt['secret_id'] ?? ''); ?>" placeholder="AKIDxxxxxxxxxxxx" required></td>
-                </tr>
-                <tr>
-                    <th scope="row"><label for="secret_key">SecretKey</label></th>
-                    <td><input type="text" id="secret_key" name="<?php echo esc_attr(TENC_TEO_OPT_KEY); ?>[secret_key]" class="regular-text" value="<?php echo esc_attr($opt['secret_key'] ?? ''); ?>" placeholder="xxxxxxxxxxxxxxxxxxxx" required></td>
-                </tr>
-                <tr>
-                    <th scope="row"><label for="zone_id">ZoneId</label></th>
-                    <td><input type="text" id="zone_id" name="<?php echo esc_attr(TENC_TEO_OPT_KEY); ?>[zone_id]" class="regular-text" value="<?php echo esc_attr($opt['zone_id'] ?? ''); ?>" placeholder="zone-xxxxxxxx" required></td>
-                </tr>
-                <tr>
-                    <th scope="row"><label for="default_host">默认 Host（首次发布用）</label></th>
-                    <td>
-                        <input type="text" id="default_host" name="<?php echo esc_attr(TENC_TEO_OPT_KEY); ?>[default_host]" class="regular-text" value="<?php echo esc_attr($opt['default_host'] ?? ''); ?>" placeholder="example.com">
-                        <p class="description">首次发布自动对该主机名执行 purge_host(invalidate)；留空则使用站点主域。</p>
-                    </td>
-                </tr>
-            </table>
-            <?php submit_button(__('保存设置', 'tenc-teo')); ?>
-        </form>
+        <!-- 配置卡片 -->
+        <div class="tenc-teo-card">
+            <h2>
+                <span class="dashicons dashicons-admin-settings" style="color: #2271b1;"></span>
+                <?php echo esc_html__('API 配置', 'tenc-teo'); ?>
+            </h2>
+            
+            <div class="tenc-teo-help-text">
+                <strong><?php echo esc_html__('📘 配置说明', 'tenc-teo'); ?></strong><br>
+                <?php echo esc_html__('1. 登录', 'tenc-teo'); ?> <a href="https://console.cloud.tencent.com/cam/capi" target="_blank"><?php echo esc_html__('腾讯云控制台', 'tenc-teo'); ?></a> <?php echo esc_html__('获取 SecretId 和 SecretKey', 'tenc-teo'); ?><br>
+                <?php echo esc_html__('2. 在', 'tenc-teo'); ?> <a href="https://console.cloud.tencent.com/edgeone" target="_blank"><?php echo esc_html__('EdgeOne 控制台', 'tenc-teo'); ?></a> <?php echo esc_html__('查看 Zone ID', 'tenc-teo'); ?><br>
+                <?php echo esc_html__('3. 填写配置后点击"测试连接"验证配置是否正确', 'tenc-teo'); ?>
+            </div>
 
-        <hr>
+            <form method="post" action="options.php">
+                <?php settings_fields(TENC_TEO_OPT_KEY); ?>
+                <table class="form-table" role="presentation">
+                    <tr>
+                        <th scope="row">
+                            <label for="secret_id">
+                                <?php echo esc_html__('SecretId', 'tenc-teo'); ?>
+                                <span style="color: #d63638;">*</span>
+                            </label>
+                        </th>
+                        <td>
+                            <input type="text" id="secret_id" name="<?php echo esc_attr(TENC_TEO_OPT_KEY); ?>[secret_id]" class="regular-text" value="<?php echo esc_attr($opt['secret_id'] ?? ''); ?>" placeholder="AKIDxxxxxxxxxxxx" required>
+                            <?php if (!empty($opt['secret_id'])): ?>
+                                <span class="dashicons dashicons-yes-alt" style="color: #00a32a;"></span>
+                            <?php endif; ?>
+                        </td>
+                    </tr>
+                    <tr>
+                        <th scope="row">
+                            <label for="secret_key">
+                                <?php echo esc_html__('SecretKey', 'tenc-teo'); ?>
+                                <span style="color: #d63638;">*</span>
+                            </label>
+                        </th>
+                        <td>
+                            <input type="password" id="secret_key" name="<?php echo esc_attr(TENC_TEO_OPT_KEY); ?>[secret_key]" class="regular-text" value="<?php echo esc_attr($opt['secret_key'] ?? ''); ?>" placeholder="xxxxxxxxxxxxxxxxxxxx" required>
+                            <?php if (!empty($opt['secret_key'])): ?>
+                                <span class="dashicons dashicons-yes-alt" style="color: #00a32a;"></span>
+                            <?php endif; ?>
+                            <button type="button" class="button button-small" onclick="var input = document.getElementById('secret_key'); input.type = input.type === 'password' ? 'text' : 'password';" style="margin-left: 5px;">
+                                <span class="dashicons dashicons-visibility" style="vertical-align: middle;"></span>
+                            </button>
+                        </td>
+                    </tr>
+                    <tr>
+                        <th scope="row">
+                            <label for="zone_id">
+                                <?php echo esc_html__('Zone ID', 'tenc-teo'); ?>
+                                <span style="color: #d63638;">*</span>
+                            </label>
+                        </th>
+                        <td>
+                            <input type="text" id="zone_id" name="<?php echo esc_attr(TENC_TEO_OPT_KEY); ?>[zone_id]" class="regular-text" value="<?php echo esc_attr($opt['zone_id'] ?? ''); ?>" placeholder="zone-xxxxxxxx" required>
+                            <?php if (!empty($opt['zone_id'])): ?>
+                                <span class="dashicons dashicons-yes-alt" style="color: #00a32a;"></span>
+                            <?php endif; ?>
+                        </td>
+                    </tr>
+                    <tr>
+                        <th scope="row">
+                            <label for="default_host"><?php echo esc_html__('默认主机名', 'tenc-teo'); ?></label>
+                        </th>
+                        <td>
+                            <input type="text" id="default_host" name="<?php echo esc_attr(TENC_TEO_OPT_KEY); ?>[default_host]" class="regular-text" value="<?php echo esc_attr($opt['default_host'] ?? ''); ?>" placeholder="example.com">
+                            <p class="description">
+                                <span class="dashicons dashicons-info" style="color: #2271b1;"></span>
+                                <?php echo esc_html__('首次发布文章时，自动对该主机名执行 purge_host(invalidate)；留空则使用站点主域', 'tenc-teo'); ?>
+                            </p>
+                        </td>
+                    </tr>
+                </table>
+                
+                <div class="tenc-teo-button-group">
+                    <?php submit_button(__('保存设置', 'tenc-teo'), 'primary', 'submit', false); ?>
+                    
+                    <?php if ($sdk_ok): ?>
+                        <form method="post" action="<?php echo esc_url(admin_url('admin-post.php')); ?>" style="display: inline-block;">
+                            <?php wp_nonce_field('tenc_teo_test_connection'); ?>
+                            <input type="hidden" name="action" value="tenc_teo_test_connection">
+                            <button type="submit" class="button button-secondary">
+                                <span class="dashicons dashicons-update" style="vertical-align: middle;"></span>
+                                <?php echo esc_html__('测试连接', 'tenc-teo'); ?>
+                            </button>
+                        </form>
+                    <?php endif; ?>
+                </div>
+            </form>
+        </div>
 
-        <h2><?php echo esc_html__('全站缓存', 'tenc-teo'); ?></h2>
-        <form method="post" action="<?php echo esc_url(admin_url('admin-post.php')); ?>">
-            <?php wp_nonce_field('tenc_teo_purge_all'); ?>
-            <input type="hidden" name="action" value="tenc_teo_purge_all">
-            <p>
-                <button type="submit" class="button button-primary" onclick="return confirm('<?php echo esc_js(__('确认提交 “全站缓存清理（purge_all, invalidate）”？', 'tenc-teo')); ?>');">
-                    <?php echo esc_html__('一键清理全站缓存（purge_all, invalidate）', 'tenc-teo'); ?>
+        <!-- 缓存清理策略说明 -->
+        <div class="tenc-teo-card">
+            <h2>
+                <span class="dashicons dashicons-info" style="color: #2271b1;"></span>
+                <?php echo esc_html__('缓存清理策略', 'tenc-teo'); ?>
+            </h2>
+            
+            <div class="tenc-teo-info-grid">
+                <div class="tenc-teo-info-item">
+                    <strong>
+                        <span class="dashicons dashicons-edit" style="color: #2271b1; vertical-align: middle;"></span>
+                        <?php echo esc_html__('文章更新', 'tenc-teo'); ?>
+                    </strong>
+                    <span><?php echo esc_html__('已发布文章更新时，使用 purge_url 精准清理该文章 URL 缓存', 'tenc-teo'); ?></span>
+                </div>
+                
+                <div class="tenc-teo-info-item">
+                    <strong>
+                        <span class="dashicons dashicons-welcome-write-blog" style="color: #00a32a; vertical-align: middle;"></span>
+                        <?php echo esc_html__('首次发布', 'tenc-teo'); ?>
+                    </strong>
+                    <span><?php echo esc_html__('新文章首次发布时，使用 purge_host(invalidate) 清理整个域名缓存', 'tenc-teo'); ?></span>
+                </div>
+                
+                <div class="tenc-teo-info-item">
+                    <strong>
+                        <span class="dashicons dashicons-admin-page" style="color: #8c8f94; vertical-align: middle;"></span>
+                        <?php echo esc_html__('文章列表', 'tenc-teo'); ?>
+                    </strong>
+                    <span><?php echo esc_html__('在文章列表中可以手动清理单篇文章缓存（已发布文章）', 'tenc-teo'); ?></span>
+                </div>
+                
+                <div class="tenc-teo-info-item">
+                    <strong>
+                        <span class="dashicons dashicons-admin-site-alt3" style="color: #d63638; vertical-align: middle;"></span>
+                        <?php echo esc_html__('全站清理', 'tenc-teo'); ?>
+                    </strong>
+                    <span><?php echo esc_html__('使用 purge_all(invalidate) 清理全站所有缓存，适用于重大改动', 'tenc-teo'); ?></span>
+                </div>
+            </div>
+        </div>
+
+        <!-- 危险操作区 -->
+        <div class="tenc-teo-card tenc-teo-danger-zone">
+            <h2>
+                <span class="dashicons dashicons-warning" style="color: #d63638;"></span>
+                <?php echo esc_html__('全站缓存清理', 'tenc-teo'); ?>
+            </h2>
+            
+            <p><?php echo esc_html__('此操作将清理全站所有缓存，可能会导致短时间内服务器负载增加。请谨慎使用！', 'tenc-teo'); ?></p>
+            
+            <form method="post" action="<?php echo esc_url(admin_url('admin-post.php')); ?>">
+                <?php wp_nonce_field('tenc_teo_purge_all'); ?>
+                <input type="hidden" name="action" value="tenc_teo_purge_all">
+                <button type="submit" class="button button-secondary" onclick="return confirm('<?php echo esc_js(__('⚠️ 警告：此操作将清理全站所有缓存！\n\n这可能会导致短时间内服务器负载增加，源站压力增大。\n\n确定要继续吗？', 'tenc-teo')); ?>');" <?php echo (!$sdk_ok || !$config_complete) ? 'disabled' : ''; ?>>
+                    <span class="dashicons dashicons-trash" style="vertical-align: middle;"></span>
+                    <?php echo esc_html__('一键清理全站缓存', 'tenc-teo'); ?>
                 </button>
+                <p class="description">
+                    <span class="dashicons dashicons-info"></span>
+                    <?php echo esc_html__('使用场景：网站主题更换、重大功能更新、紧急问题修复等', 'tenc-teo'); ?>
+                </p>
+            </form>
+        </div>
+
+        <!-- 帮助信息 -->
+        <div class="tenc-teo-card" style="background: #f6f7f7;">
+            <h3>
+                <span class="dashicons dashicons-sos" style="color: #2271b1;"></span>
+                <?php echo esc_html__('需要帮助？', 'tenc-teo'); ?>
+            </h3>
+            <p>
+                <?php echo esc_html__('相关文档：', 'tenc-teo'); ?>
+                <a href="https://cloud.tencent.com/document/product/1552" target="_blank"><?php echo esc_html__('EdgeOne 产品文档', 'tenc-teo'); ?></a> | 
+                <a href="https://cloud.tencent.com/document/api/1552/70789" target="_blank"><?php echo esc_html__('API 参考', 'tenc-teo'); ?></a>
             </p>
-            <p class="description"><?php echo esc_html__('用于重大改动或紧急情况，请谨慎使用。', 'tenc-teo'); ?></p>
-        </form>
+        </div>
     </div>
 <?php }
 
