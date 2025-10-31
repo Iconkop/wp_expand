@@ -2,7 +2,7 @@
 /**
  * Plugin Name: Tencent EdgeOne Cache Manager
  * Description: EO 缓存清理：单篇/更新用 purge_url，首次发布用 purge_host(invalidate)，全站 purge_all(invalidate)；使用官方 PHP SDK。
- * Version:     1.0.5
+ * Version:     1.0.6
  * Author:      Shinko
  * Text Domain: tenc-teo
  * Plugin URI:  https://github.com/Iconkop/wp_expand
